@@ -1,7 +1,6 @@
 package jp.co.bizreach.dynamodb4s
 
-import com.amazonaws.services.dynamodbv2.model.{QueryRequest, Select, AttributeValue}
-import com.amazonaws.services.dynamodbv2.model.Condition
+import com.amazonaws.services.dynamodbv2.model._
 import scala.collection.JavaConverters._
 
 import reflect.ClassTag
@@ -98,6 +97,35 @@ trait DynamoTable {
         mapper(_table, new DynamoRow(item))
       }
     }
+
+    def scan[E <: AnyRef]()(implicit db: awscala.dynamodbv2.DynamoDB, c: ClassTag[E]): Seq[E] = {
+      val req = new ScanRequest().withTableName(table)
+      val items = db.scan(req).getItems
+      val tableInfo = getTableInfo(_table)
+      val clazz  = c.runtimeClass
+      val fields = clazz.getDeclaredFields
+
+      items.asScala.map { x =>
+        val c = clazz.getConstructors()(0)
+        val args = c.getParameterTypes.map { x =>
+          if(x == classOf[Int]) new Integer(0) else null
+        }
+        val o = c.newInstance(args: _*)
+        fields.foreach { f =>
+          f.setAccessible(true)
+          val t = f.getType
+          val attribute = x.get(f.getName)
+          val property = tableInfo.getDynamoProperty(f.getName)
+          if(t == classOf[Option[_]]){
+            f.set(o, Option(property.convert(getAttributeValue(attribute))))
+          } else {
+            f.set(o, property.convert(getAttributeValue(attribute)))
+          }
+        }
+        o.asInstanceOf[E]
+      }
+    }
+
 
     def as[E <: AnyRef](implicit db: awscala.dynamodbv2.DynamoDB, c: ClassTag[E]): Seq[E] = {
       val req = new QueryRequest()
